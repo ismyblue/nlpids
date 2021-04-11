@@ -73,8 +73,8 @@ class Confusion_Matrix_Saver(keras.callbacks.Callback):
         混淆矩阵保存回调
         :param filepath: 
         :param num_classes: 
-        :param x: 训练数据
-        :param y: 训练标签
+        :param x: 数据
+        :param y: 标签
         """
         self.filepath = filepath
         self.num_classes = num_classes
@@ -127,10 +127,10 @@ if __name__ == '__main__':
         method = resampling_methods[i]
         # 获取数据
         (x_train, y_train), (x_test, y_test) = load_http_dataset_csic_2010()
-        # x_train = x_train[:200]
-        # y_train = y_train[:200]
-        # x_test = x_test[:200]
-        # y_test = y_test[:200]
+        x_train = x_train[:100]
+        y_train = y_train[:100]
+        x_test = x_test[:100]
+        y_test = y_test[:100]
         print('样本平衡前: y_train', sorted(Counter(y_train).items()))
 
         # 样本平衡
@@ -143,9 +143,18 @@ if __name__ == '__main__':
         with open('resampling_data/{}.pkl'.format(method), 'wb') as f:
             pickle.dump({'x_train': x_train, 'y_train': y_train}, f)
 
+        # one_hot 标签
+        y_train = tf.squeeze(tf.one_hot(y_train, 2))
+        y_test = tf.squeeze(tf.one_hot(y_test, 2))
+
+        # 确定随机种子,保证每个新的分类器初始化参数一致
+        np.random.seed(100)
+        tf.random.set_seed(100)
+
         # 构造分类器
-        webAttackClassifier = WebAttackClassifier(num_layers=1, d_model=16, num_heads=8, dff=16,
+        webAttackClassifier = WebAttackClassifier(num_layers=1, seq_len=x_train.shape[1], d_model=16, num_heads=8, dff=16,
                                                   input_vocab_size=vocab_size, categories=2)
+
         # 学习速率
         learning_rate = CustomSchedule(16)
         # 优化器
@@ -160,14 +169,12 @@ if __name__ == '__main__':
 
         # 训练##############################################
         print('开始训练...')
-        # one_hot 标签
-        y_train = tf.squeeze(tf.one_hot(y_train, 2))
-
         # history记录回调
         csv_logger = tf.keras.callbacks.CSVLogger('history/{}_fit.csv'.format(method))
         # 保存混淆矩阵的回调
+
         confusion_matrix_saver = Confusion_Matrix_Saver('confusion_matrix/{}_fit.pkl'.format(method), num_classes=2,
-                                                        x=x_train, y=y_train)
+                                                        x=x_test, y=y_test)
         # 保存模型的回调
         model_saver = keras.callbacks.ModelCheckpoint(filepath="checkpoints/{}_multihead".format(method),
                                                       save_freq='epoch', verbose=1)
@@ -177,15 +184,14 @@ if __name__ == '__main__':
 
         # 评估##############################################
         print('开始评估...')
-        y_test = tf.squeeze(tf.one_hot(y_test, 2))
         # 混淆矩阵保存
         confusion_matrix_saver = Confusion_Matrix_Saver('confusion_matrix/{}_evaluate.pkl'.format(method),
                                                         num_classes=2,
                                                         x=x_test, y=y_test)
         # 评估
-        fit_history = webAttackClassifier.evaluate(x_test, y_test, batch_size=64, callbacks=[confusion_matrix_saver])
+        webAttackClassifier.evaluate(x_test, y_test, batch_size=64, callbacks=[confusion_matrix_saver])
 
-        # 删除空间，避免OOM
+        # 删除空间，避免OOM?
         del x_train
         del y_train
         del x_test

@@ -10,6 +10,54 @@ from keywords import keywords_dict_size
 from classifier_BiLSTM import *
 
 
+class Confusion_Matrix_Saver(keras.callbacks.Callback):
+    """
+    自定义回调函数，用于保存每epoch的混淆矩阵
+    """
+    def __init__(self, filepath, num_classes, x, y):
+        """
+        混淆矩阵保存回调
+        :param filepath:
+        :param num_classes:
+        :param x: 数据
+        :param y: 标签
+        """
+        self.filepath = filepath
+        self.num_classes = num_classes
+        self.x = x
+        self.y = tf.argmax(y, axis=1)
+
+    def on_train_begin(self, logs):
+        self.confusion_matrix_list = []
+
+    def on_epoch_end(self, epoch, logs):
+        y_pre = self.model.predict(self.x)
+        y_pre = tf.argmax(y_pre, axis=1)
+        matrix = np.zeros(shape=(self.num_classes, self.num_classes), dtype='int32')
+        for i in range(y_pre.shape[0]):
+            matrix[self.y[i]][y_pre[i]] += 1
+        self.confusion_matrix_list.append(matrix)
+        # 每一epoch结束，保存一下所有的混淆矩阵
+        with open(self.filepath, 'wb') as f:
+            pickle.dump(self.confusion_matrix_list, f)
+        print('第{}个epoch的混淆矩阵保存成功...'.format(epoch))
+
+    def on_test_begin(self, logs):
+        self.confusion_matrix_list = []
+
+    def on_test_end(self, logs):
+        y_pre = self.model.predict(self.x)
+        y_pre = tf.argmax(y_pre, axis=1)
+        matrix = np.zeros(shape=(self.num_classes, self.num_classes), dtype='int32')
+        for i in range(y_pre.shape[0]):
+            matrix[self.y[i]][y_pre[i]] += 1
+        self.confusion_matrix_list.append(matrix)
+        # 每一epoch结束，保存一下所有的混淆矩阵
+        with open(self.filepath, 'wb') as f:
+            pickle.dump(self.confusion_matrix_list, f)
+        print('evaluate的混淆矩阵保存成功...')
+
+
 class MultiHeadAttention(keras.layers.Layer):
     def __init__(self, d_model, num_heads):
         """
@@ -126,7 +174,7 @@ class MultiHeadLayer(keras.layers.Layer):
 
 
 class MultiHeadClassifier(keras.layers.Layer):
-    def __init__(self, num_layers, d_model, num_heads, dff, input_vocab_size, rate=0.1):
+    def __init__(self, num_layers, seq_len, d_model, num_heads, dff, input_vocab_size, rate=0.1):
         """
         构造一个编码器
         :param num_layers: 编码层数量
@@ -139,7 +187,7 @@ class MultiHeadClassifier(keras.layers.Layer):
         super(MultiHeadClassifier, self).__init__()
         self.d_model = d_model
         self.num_layers = num_layers
-        self.pos_encoding = self.positional_encoding(input_vocab_size, self.d_model)
+        self.pos_encoding = self.positional_encoding(seq_len + input_vocab_size, self.d_model)
 
         self.enc_layers = [MultiHeadLayer(d_model, num_heads, dff, rate) for _ in range(num_layers)]
         self.dropout = keras.layers.Dropout(rate)
@@ -176,11 +224,10 @@ class MultiHeadClassifier(keras.layers.Layer):
 
         # x = self.embedding(x)
         seq_len = tf.shape(x)[1]
-
         x *= tf.math.sqrt(tf.cast(self.d_model, tf.float32))
+
         # sin cos位置
         x += self.pos_encoding[:, :seq_len, :]
-
         x = self.dropout(x, training=training)
 
         for i in range(self.num_layers):
@@ -207,34 +254,39 @@ class CustomSchedule(keras.optimizers.schedules.LearningRateSchedule):
 
 
 class WebAttackClassifier(keras.Model):
-    def __init__(self, num_layers, d_model, num_heads, dff,
-                 input_vocab_size, categories, rate=0.1):
+    def __init__(self, num_layers, seq_len, d_model, num_heads, dff,
+                 input_vocab_size, categories, model_cls='Bi-LSTM_multihead', rate=0.1):
         """
         模型构造
         :param num_layers: 注意力编码层数量
+        :param seq_len: 句向量长度
         :param d_model: 词向量长度
         :param num_heads: 注意力头数
         :param dff:
-        :param input_vocab_size: 输入词字典大小
+        :param input_vocab_size:  输入词字典大小
         :param categories: 分类的数量
         :param rate: dropout失活比率
+        :param model_cls: 模型类别 'multihead' 'Bi-LSTM_multihead' 'Bi-LSTM'
         """
         super(WebAttackClassifier, self).__init__()
-        self.d_model = d_model
+        self.model_cls = model_cls
+        print('分类器模型架构为：{}'.format(model_cls))
 
         # 词嵌入层，word2vec
         self.embedding = keras.layers.Embedding(input_vocab_size, d_model, mask_zero=True)
 
-        self.multiheadclassifier = MultiHeadClassifier(num_layers, d_model, num_heads, dff, input_vocab_size, rate)
-        #
-        # self.rnn_layer = keras.Sequential([
-        #     # 双向LSTM层
-        #     tf.keras.layers.Bidirectional(tf.keras.layers.LSTM(16, return_sequences=True)),
-        #     tf.keras.layers.Bidirectional(tf.keras.layers.LSTM(16)),
-        #     # 全连接层
-        #     keras.layers.Dense(16, activation='relu'),
-        # ], name='Bi-LSTM')
-        self.reshape = keras.layers.Reshape(target_shape=(-1,))
+        if 'multihead' in self.model_cls:
+            self.multiheadclassifier = MultiHeadClassifier(num_layers, seq_len, d_model, num_heads, dff, input_vocab_size, rate)
+            self.reshape = keras.layers.Reshape(target_shape=(-1,))
+
+        if 'Bi-LSTM' in self.model_cls:
+            self.rnn_layer = keras.Sequential([
+                # 双向LSTM层
+                tf.keras.layers.Bidirectional(tf.keras.layers.LSTM(16, return_sequences=True)),
+                tf.keras.layers.Bidirectional(tf.keras.layers.LSTM(16)),
+                # 全连接层
+                keras.layers.Dense(16, activation='relu'),
+            ], name='Bi-LSTM')
 
         self.final_layer = keras.Sequential([
             # keras.layers.Reshape(target_shape=(-1,)),
@@ -245,18 +297,28 @@ class WebAttackClassifier(keras.Model):
     def call(self, inp, training):
         # word2vec
         inp = self.embedding(inp)
+        # 模型类别  'multihead' 'Bi-LSTM_multihead' 'Bi-LSTM'
+
         # multiheadclassifier输出
-        enc_output = self.multiheadclassifier(inp, training)
-        enc_output = self.reshape(enc_output)
+        if 'multihead' in self.model_cls:
+            enc_output = self.multiheadclassifier(inp, training)
+            enc_output = self.reshape(enc_output)
         # Bi-LSTM输出
-        # rnn_output = self.rnn_layer(inp)
+        if 'Bi-LSTM' in self.model_cls:
+            rnn_output = self.rnn_layer(inp)
+
         # 合并输出
-        # combined_output = tf.concat([enc_output, rnn_output], axis=1)
+        if 'multihead' in self.model_cls and 'Bi-LSTM' in self.model_cls:
+            output = tf.concat([enc_output, rnn_output], axis=1)
+        elif 'multihead' in self.model_cls:
+            output = enc_output
+        elif 'Bi-LSTM' in self.model_cls:
+            output = rnn_output
+
         # 分类输出
-        final_output = self.final_layer(enc_output)
+        final_output = self.final_layer(output)
 
         return final_output
-
 
     def train(self, x_train, y_train, x_test, y_test, epochs=20):
         """
@@ -386,34 +448,81 @@ class WebAttackClassifier(keras.Model):
 
 from imblearn.combine import SMOTETomek
 if __name__ == '__main__':
-    (x_train, y_train), (x_test, y_test) = load_http_dataset_csic_2010()
-    # x_train = x_train[:64 * 200]
-    # y_train = y_train[:64 * 200]
-    print("x_train.shape:", x_train.shape)
-    print("y_train.shape:", y_train.shape)
-    vocab_size = keywords_dict_size()
-    print("vocab_size:", vocab_size)
 
-    # 构造分类器
-    webAttackClassifier = WebAttackClassifier(
-        num_layers=1,
-        d_model=16,
-        num_heads=8,
-        dff=16,
-        input_vocab_size=vocab_size,
-        categories=2
-    )
-    # 学习速率
-    learning_rate = CustomSchedule(16)
-    # 优化器
+    model_cls_list = ['Bi-LSTM_multihead', 'multihead', 'Bi-LSTM']
+    # 对不同的模型架构进行实验
+    for model_cls in model_cls_list:
+        print("开始对model_cls模型进行实验...")
 
-    optimizer = keras.optimizers.Adam(learning_rate, beta_1=0.9, beta_2=0.98, epsilon=1e-9)
-    webAttackClassifier.compile(optimizer=optimizer, loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True),
-                                metrics=[tf.keras.metrics.SparseCategoricalAccuracy()])
+        (x_train, y_train), (x_test, y_test) = load_http_dataset_csic_2010()
+        print("x_train.shape:", x_train.shape)
+        print("y_train.shape:", y_train.shape)
+        vocab_size = keywords_dict_size()
+        print("vocab_size:", vocab_size)
+        # x_train = x_train[:100]
+        # y_train = y_train[:100]
+        # x_test = x_test[:100]
+        # y_test = y_test[:100]
 
-    # smote_tomek = SMOTETomek(random_state=0)
-    # x_train, y_train = smote_tomek.fit_resample(x_train, y_train)
-    webAttackClassifier.fit(x_train, y_train, batch_size=128, epochs=20)
-    # webAttackClassifier.train(x_train, y_train, x_test, y_test, 20)
+        # one_hot 标签
+        y_train = tf.squeeze(tf.one_hot(y_train, 2))
+        y_test = tf.squeeze(tf.one_hot(y_test, 2))
 
+        # 确定随机种子
+        np.random.seed(100)
+        tf.random.set_seed(100)
 
+        # 构造分类器
+        webAttackClassifier = WebAttackClassifier(
+            num_layers=1,
+            seq_len=x_train.shape[1],
+            d_model=16,
+            num_heads=8,
+            dff=16,
+            input_vocab_size=vocab_size,
+            categories=2,
+            model_cls=model_cls
+        )
+
+        # 学习速率
+        learning_rate = CustomSchedule(16)
+        # 优化器
+        optimizer = keras.optimizers.Adam(learning_rate, beta_1=0.9, beta_2=0.98, epsilon=1e-9)
+        # 指定模型优化器、loss、指标
+        webAttackClassifier.compile(optimizer=optimizer,
+                                    loss=tf.keras.losses.CategoricalCrossentropy(from_logits=False),
+                                    metrics=[tf.keras.metrics.CategoricalAccuracy(),
+                                             tf.keras.metrics.Precision(),
+                                             tf.keras.metrics.Recall(),
+                                             ])
+
+        # 训练##############################################
+        # history记录回调
+        csv_logger = tf.keras.callbacks.CSVLogger('history/{}_fit.csv'.format(model_cls))
+        # 保存混淆矩阵的回调
+        confusion_matrix_saver = Confusion_Matrix_Saver('confusion_matrix/{}_fit.pkl'.format(model_cls), num_classes=2,
+                                                        x=x_test, y=y_test)
+        # 保存模型的回调
+        model_saver = keras.callbacks.ModelCheckpoint(filepath="checkpoints/{}".format(model_cls),
+                                                      save_freq='epoch', verbose=1)
+        # 开始训练
+        webAttackClassifier.fit(x_train, y_train, batch_size=64, epochs=50,
+                                callbacks=[csv_logger, confusion_matrix_saver, model_saver])
+        # webAttackClassifier.train(x_train, y_train, x_test, y_test, 20)
+
+        # 评估##############################################
+        print('开始评估...')
+        # 混淆矩阵保存
+        confusion_matrix_saver = Confusion_Matrix_Saver('confusion_matrix/{}_evaluate.pkl'.format(model_cls),
+                                                        num_classes=2,
+                                                        x=x_test, y=y_test)
+        # 评估
+        webAttackClassifier.evaluate(x_test, y_test, batch_size=64, callbacks=[confusion_matrix_saver])
+
+        # 删除空间，避免OOM?
+        del x_train
+        del y_train
+        del x_test
+        del y_test
+        del confusion_matrix_saver
+        del webAttackClassifier
