@@ -1,10 +1,7 @@
 import pickle
 import numpy as np
+import os
 import matplotlib.pyplot as plt
-
-matrix = pickle.load(open('None_fit.pkl', 'rb'))
-matrix = np.array(matrix)
-
 
 def calc_binary_metrics(matrix):
     """
@@ -17,16 +14,73 @@ def calc_binary_metrics(matrix):
     FP = matrix[:, 1, 0]
     TP = matrix[:, 1, 1]
     acc = (TP + TN) / (TP + TN + FP + FN)
-    TPR = TP / (TP + FN)
-    FPR = FP / (FP + TN)
-    return acc, TPR, FPR
+    precision = (TP) / (TP + FP)
+    TPR = TP / (TP + FP)
+    FPR = FP / (TP + FP)
+    return acc, precision, TPR, FPR
 
 
-acc, TPR, FPR = calc_binary_metrics(matrix)
+acc_dict = {}
+precision_dict = {}
+TPR_dict = {}
+FPR_dict = {}
+for file in os.listdir():
+    if 'pkl' not in file:
+        continue
+    obj = pickle.load(open(file, 'rb'))
+    matrix = np.array(obj['confusion_matrix_list'])
+    predict_list = np.array(obj['predict_list'])
+    if 'evaluate' in file:
+        print(file)
+        print(matrix)
+        continue
+    acc, precision, TPR, FPR = calc_binary_metrics(matrix)
+    acc_dict[file] = acc
+    precision_dict[file] = precision
+    TPR_dict[file] = TPR
+    FPR_dict[file] = FPR
+
+# 画ACC
 plt.figure()
-plt.plot(np.arange(0, len(acc)), acc, label='acc')
-plt.plot(np.arange(0, len(TPR)), TPR, label='TPR')
+plt.title('Accuracy')
+plt.xlabel('Epochs')
+plt.ylabel('Percentage')
+for file_name in acc_dict:
+    acc = acc_dict[file_name]
+    plt.plot(np.arange(0, len(acc)), acc, label=file_name)
 plt.legend()
+
+# # 画precision
+# plt.figure()
+# plt.title('Precision')
+# plt.xlabel('Epochs')
+# plt.ylabel('Percentage')
+# for file_name in TPR_dict:
+#     precision = precision_dict[file_name]
+#     plt.plot(np.arange(0, len(precision)), precision, label=file_name)
+# plt.legend()
+
+# 画TPR
+plt.figure()
+plt.title('TPR')
+plt.xlabel('Epochs')
+plt.ylabel('Percentage')
+for file_name in TPR_dict:
+    TPR = TPR_dict[file_name]
+    plt.plot(np.arange(0, len(TPR)), TPR, label=file_name)
+plt.legend()
+
+
+# # 画FPR
+# plt.figure()
+# plt.title('FPR')
+# plt.xlabel('Epochs')
+# plt.ylabel('Percentage')
+# for file_name in TPR_dict:
+#     FPR = FPR_dict[file_name]
+#     plt.plot(np.arange(0, len(FPR)), FPR, label=file_name)
+# plt.legend()
+
 plt.show()
 
 

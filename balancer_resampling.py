@@ -9,11 +9,14 @@ from classifier_multihead import WebAttackClassifier, CustomSchedule
 
 from tensorflow import keras
 from tensorflow.keras.metrics import Metric
+from sklearn.utils import shuffle
 
 from collections import Counter
 from imblearn.over_sampling import RandomOverSampler, SMOTE, ADASYN, BorderlineSMOTE
 from imblearn.under_sampling import RandomUnderSampler, ClusterCentroids, NearMiss, TomekLinks
 from imblearn.combine import SMOTEENN, SMOTETomek
+
+from callback_utils import Confusion_Matrix_Saver
 
 
 def balance_data(method, x_train, y_train):
@@ -33,83 +36,37 @@ def balance_data(method, x_train, y_train):
         return x_train, y_train
     elif method == 'RandomOverSampler':
         resamper = RandomOverSampler(random_state=0)
-        return resamper.fit_resample(x_train, y_train)
+        x_train, y_train = resamper.fit_resample(x_train, y_train)
     elif method == 'SMOTE':
         resamper = SMOTE(random_state=0)
-        return resamper.fit_resample(x_train, y_train)
+        x_train, y_train = resamper.fit_resample(x_train, y_train)
     elif method == 'ADASYN':
         resamper = ADASYN(random_state=0)
-        return resamper.fit_resample(x_train, y_train)
-    elif method == 'RandomUnderSampler':
-        resamper = RandomUnderSampler(random_state=0)
-        return resamper.fit_resample(x_train, y_train)
+        x_train, y_train = resamper.fit_resample(x_train, y_train)
     elif method == 'BorderlineSMOTE':
         resamper = BorderlineSMOTE(random_state=0)
-        return resamper.fit_resample(x_train, y_train)
+        x_train, y_train = resamper.fit_resample(x_train, y_train)
+    elif method == 'RandomUnderSampler':
+        resamper = RandomUnderSampler(random_state=0)
+        x_train, y_train = resamper.fit_resample(x_train, y_train)
     elif method == 'ClusterCentroids':
         resamper = ClusterCentroids(random_state=0)
-        return resamper.fit_resample(x_train, y_train)
+        x_train, y_train = resamper.fit_resample(x_train, y_train)
     elif method == 'NearMiss':
-        resamper = NearMiss()
-        return resamper.fit_resample(x_train, y_train)
+        resamper = NearMiss(version=2)
+        x_train, y_train = resamper.fit_resample(x_train, y_train)
     elif method == 'TomekLinks':
         resamper = TomekLinks()
-        return resamper.fit_resample(x_train, y_train)
+        x_train, y_train = resamper.fit_resample(x_train, y_train)
     elif method == 'SMOTETomek':
         resamper = SMOTETomek(random_state=0)
-        return resamper.fit_resample(x_train, y_train)
+        x_train, y_train = resamper.fit_resample(x_train, y_train)
     elif method == 'SMOTEENN':
         resamper = SMOTEENN(random_state=0)
-        return resamper.fit_resample(x_train, y_train)
-
-
-class Confusion_Matrix_Saver(keras.callbacks.Callback):
-    """
-    自定义回调函数，用于保存每epoch的混淆矩阵
-    """
-
-    def __init__(self, filepath, num_classes, x, y):
-        """
-        混淆矩阵保存回调
-        :param filepath: 
-        :param num_classes: 
-        :param x: 数据
-        :param y: 标签
-        """
-        self.filepath = filepath
-        self.num_classes = num_classes
-        self.x = x
-        self.y = tf.argmax(y, axis=1)
-
-    def on_train_begin(self, logs):
-        self.confusion_matrix_list = []
-
-    def on_epoch_end(self, epoch, logs):
-        y_pre = self.model.predict(self.x)
-        y_pre = tf.argmax(y_pre, axis=1)
-        matrix = np.zeros(shape=(self.num_classes, self.num_classes), dtype='int32')
-        for i in range(y_pre.shape[0]):
-            matrix[self.y[i]][y_pre[i]] += 1
-        self.confusion_matrix_list.append(matrix)
-        # 每一epoch结束，保存一下所有的混淆矩阵
-        with open(self.filepath, 'wb') as f:
-            pickle.dump(self.confusion_matrix_list, f)
-        print('第{}个epoch的混淆矩阵保存成功...'.format(epoch))
-
-    def on_test_begin(self, logs):
-        self.confusion_matrix_list = []
-
-    def on_test_end(self, logs):
-        y_pre = self.model.predict(self.x)
-        y_pre = tf.argmax(y_pre, axis=1)
-        matrix = np.zeros(shape=(self.num_classes, self.num_classes), dtype='int32')
-        for i in range(y_pre.shape[0]):
-            matrix[self.y[i]][y_pre[i]] += 1
-        self.confusion_matrix_list.append(matrix)
-        # 每一epoch结束，保存一下所有的混淆矩阵
-        with open(self.filepath, 'wb') as f:
-            pickle.dump(self.confusion_matrix_list, f)
-        print('evaluate的混淆矩阵保存成功...')
+        x_train, y_train = resamper.fit_resample(x_train, y_train)
+    # 洗牌，打乱
+    x_train, y_train = shuffle(x_train, y_train, random_state=100)
+    return x_train, y_train
 
 
 if __name__ == '__main__':
@@ -120,28 +77,31 @@ if __name__ == '__main__':
     vocab_size = keywords_dict_size()
     print("vocab_size:", vocab_size)
 
-    resampling_methods = ['None', 'RandomOverSampler', 'SMOTE', 'ADASYN', 'BorderlineSMOTE', 'RandomUnderSampler',
-                          'ClusterCentroids', 'NearMiss', 'TomekLinks', 'SMOTETomek', 'SMOTEENN']
+    resampling_methods = ['RandomOverSampler', 'RandomUnderSampler', 'SMOTE', 'SMOTEENN', 'None', 'TomekLinks',
+                          'ADASYN', 'NearMiss', 'SMOTETomek', 'BorderlineSMOTE', 'ClusterCentroids']
     # 选用不同的方法进行样本平衡
     for i in range(0, len(resampling_methods)):
         method = resampling_methods[i]
         # 获取数据
         (x_train, y_train), (x_test, y_test) = load_http_dataset_csic_2010()
-        x_train = x_train[:100]
-        y_train = y_train[:100]
-        x_test = x_test[:100]
-        y_test = y_test[:100]
+        # x_train = x_train[:100]
+        # y_train = y_train[:100]
+        # x_test = x_test[:100]
+        # y_test = y_test[:100]
         print('样本平衡前: y_train', sorted(Counter(y_train).items()))
 
-        # 样本平衡
-        print('使用{}方法进行样本平衡'.format(method))
-        x_train, y_train = balance_data(method, x_train, y_train)
-        print('样本平衡后：y_train', sorted(Counter(y_train).items()))
-
-        # 保存平衡后的样本
-        print('保存{}方法平衡后的样本..'.format(method))
-        with open('resampling_data/{}.pkl'.format(method), 'wb') as f:
-            pickle.dump({'x_train': x_train, 'y_train': y_train}, f)
+        if os.path.exists('resampling_data/{}.pkl'.format(method)):
+            data = pickle.load(open('resampling_data/{}.pkl'.format(method), 'rb'))
+            x_train, y_train = data['x_train'], data['y_train']
+        else:
+            # 样本平衡
+            print('使用{}方法进行样本平衡'.format(method))
+            x_train, y_train = balance_data(method, x_train, y_train)
+            # 保存平衡后的样本
+            print('保存{}方法平衡后的样本..'.format(method))
+            with open('resampling_data/{}.pkl'.format(method), 'wb') as f:
+                pickle.dump({'x_train': x_train, 'y_train': y_train}, f)
+        print('{}算法样本平衡后：y_train'.format(method), sorted(Counter(y_train).items()))
 
         # one_hot 标签
         y_train = tf.squeeze(tf.one_hot(y_train, 2))
@@ -152,13 +112,14 @@ if __name__ == '__main__':
         tf.random.set_seed(100)
 
         # 构造分类器
-        webAttackClassifier = WebAttackClassifier(num_layers=1, seq_len=x_train.shape[1], d_model=16, num_heads=8, dff=16,
-                                                  input_vocab_size=vocab_size, categories=2)
+        webAttackClassifier = WebAttackClassifier(num_layers=1, seq_len=x_train.shape[1], d_model=64, num_heads=8,
+                                                  dff=16, input_vocab_size=vocab_size, categories=2)
 
-        # 学习速率
-        learning_rate = CustomSchedule(16)
-        # 优化器
-        optimizer = keras.optimizers.Adam(learning_rate, beta_1=0.9, beta_2=0.98, epsilon=1e-9)
+        # # 学习速率
+        # learning_rate = CustomSchedule(webAttackClassifier.d_model)
+        # # 优化器
+        # optimizer = keras.optimizers.Adam(learning_rate, beta_1=0.9, beta_2=0.98, epsilon=1e-9)
+        optimizer = keras.optimizers.Adam()
         # 指定模型优化器、loss、指标
         webAttackClassifier.compile(optimizer=optimizer,
                                     loss=tf.keras.losses.CategoricalCrossentropy(from_logits=False),
@@ -172,14 +133,13 @@ if __name__ == '__main__':
         # history记录回调
         csv_logger = tf.keras.callbacks.CSVLogger('history/{}_fit.csv'.format(method))
         # 保存混淆矩阵的回调
-
         confusion_matrix_saver = Confusion_Matrix_Saver('confusion_matrix/{}_fit.pkl'.format(method), num_classes=2,
                                                         x=x_test, y=y_test)
         # 保存模型的回调
-        model_saver = keras.callbacks.ModelCheckpoint(filepath="checkpoints/{}_multihead".format(method),
+        model_saver = keras.callbacks.ModelCheckpoint(filepath="checkpoints/{}/{}_multihead".format(method, method),
                                                       save_freq='epoch', verbose=1)
         # 开始训练
-        webAttackClassifier.fit(x_train, y_train, batch_size=64, epochs=50,
+        webAttackClassifier.fit(x_train, y_train, batch_size=128, epochs=50,
                                 callbacks=[csv_logger, confusion_matrix_saver, model_saver])
 
         # 评估##############################################
