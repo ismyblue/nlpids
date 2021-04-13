@@ -10,6 +10,10 @@ import os
 
 
 def keywords_dict_size():
+    """
+    字典大小
+    :return: int32
+    """
     if os.path.exists('./keywords/keywords_dict_size.pickle'):
         return pickle.load(open('./keywords/keywords_dict_size.pickle', 'rb'))
     else:

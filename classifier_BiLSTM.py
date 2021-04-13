@@ -175,7 +175,7 @@ import random
 
 if __name__ == '__main__':
     # 获取数据和标签
-    (x_train, y_train), (x_test, y_test) = load_http_dataset_csic_2010()
+    (x_train, y_train), _, (x_test, y_test) = load_http_dataset_csic_2010()
     print("字典大小：", keywords_dict_size())
     # 构造分类器
     cls = Classifier(keywords_dict_size(), weight_path='training/cp.ckpt')

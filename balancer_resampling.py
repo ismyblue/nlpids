@@ -83,11 +83,13 @@ if __name__ == '__main__':
     for i in range(0, len(resampling_methods)):
         method = resampling_methods[i]
         # 获取数据
-        (x_train, y_train), (x_test, y_test) = load_http_dataset_csic_2010()
-        # x_train = x_train[:100]
-        # y_train = y_train[:100]
-        # x_test = x_test[:100]
-        # y_test = y_test[:100]
+        (x_train, y_train), (x_validate, y_validate), (x_test, y_test) = load_http_dataset_csic_2010()
+        x_train = x_train[:100]
+        y_train = y_train[:100]
+        x_validate = x_validate[:100]
+        y_validate = y_validate[:100]
+        x_test = x_test[:100]
+        y_test = y_test[:100]
         print('样本平衡前: y_train', sorted(Counter(y_train).items()))
 
         if os.path.exists('resampling_data/{}.pkl'.format(method)):
@@ -105,12 +107,15 @@ if __name__ == '__main__':
 
         # one_hot 标签
         y_train = tf.squeeze(tf.one_hot(y_train, 2))
+        y_validate = tf.squeeze(tf.one_hot(y_validate, 2))
         y_test = tf.squeeze(tf.one_hot(y_test, 2))
 
         # 确定随机种子,保证每个新的分类器初始化参数一致
         np.random.seed(100)
         tf.random.set_seed(100)
 
+        # 构造或恢复分类器
+        checkpoint_dir = "checkpoints/" + method
         # 构造分类器
         webAttackClassifier = WebAttackClassifier(num_layers=1, seq_len=x_train.shape[1], d_model=64, num_heads=8,
                                                   dff=16, input_vocab_size=vocab_size, categories=2)
@@ -130,31 +135,39 @@ if __name__ == '__main__':
 
         # 训练##############################################
         print('开始训练...')
-        # history记录回调
+        # history记录回调函数
         csv_logger = tf.keras.callbacks.CSVLogger('history/{}_fit.csv'.format(method))
-        # 保存混淆矩阵的回调
-        confusion_matrix_saver = Confusion_Matrix_Saver('confusion_matrix/{}_fit.pkl'.format(method), num_classes=2,
-                                                        x=x_test, y=y_test)
-        # 保存模型的回调
-        model_saver = keras.callbacks.ModelCheckpoint(filepath="checkpoints/{}/{}_multihead".format(method, method),
+
+        # 保存训练集混淆矩阵的回调函数
+        train_confusion_matrix_saver = Confusion_Matrix_Saver('confusion_matrix/{}_train.pkl'.format(method),
+                                                              num_classes=2, x=x_train, y=y_train)
+        # 保存验证集混淆矩阵的回调函数
+        validate_confusion_matrix_saver = Confusion_Matrix_Saver('confusion_matrix/{}_validate.pkl'.format(method),
+                                                                 num_classes=2, x=x_validate, y=y_validate)
+        # 保存模型的回调函数
+        model_saver = keras.callbacks.ModelCheckpoint(filepath=checkpoint_dir + "/" + method + "{epoch}",
                                                       save_freq='epoch', verbose=1)
         # 开始训练
-        webAttackClassifier.fit(x_train, y_train, batch_size=128, epochs=50,
-                                callbacks=[csv_logger, confusion_matrix_saver, model_saver])
+        webAttackClassifier.fit(x_train, y_train, batch_size=64, epochs=5,
+                                callbacks=[csv_logger, train_confusion_matrix_saver, validate_confusion_matrix_saver,
+                                           model_saver])
 
         # 评估##############################################
-        print('开始评估...')
-        # 混淆矩阵保存
-        confusion_matrix_saver = Confusion_Matrix_Saver('confusion_matrix/{}_evaluate.pkl'.format(method),
-                                                        num_classes=2,
-                                                        x=x_test, y=y_test)
+        print('使用测试集合评估...')
+        # 测试集的混淆矩阵保存
+        test_confusion_matrix_saver = Confusion_Matrix_Saver('confusion_matrix/{}_test.pkl'.format(method),
+                                                        num_classes=2, x=x_test, y=y_test)
         # 评估
-        webAttackClassifier.evaluate(x_test, y_test, batch_size=64, callbacks=[confusion_matrix_saver])
+        webAttackClassifier.evaluate(x_test[:10], y_test[:10], batch_size=64, callbacks=[test_confusion_matrix_saver])
 
         # 删除空间，避免OOM?
         del x_train
         del y_train
+        del x_validate
+        del y_validate
         del x_test
         del y_test
-        del confusion_matrix_saver
+        del train_confusion_matrix_saver
+        del validate_confusion_matrix_saver
+        del test_confusion_matrix_saver
         del webAttackClassifier

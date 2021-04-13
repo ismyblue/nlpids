@@ -1,7 +1,9 @@
 import pickle
 import numpy as np
 import os
+import tensorflow as tf
 import matplotlib.pyplot as plt
+
 
 def calc_binary_metrics(matrix):
     """
@@ -15,8 +17,8 @@ def calc_binary_metrics(matrix):
     TP = matrix[:, 1, 1]
     acc = (TP + TN) / (TP + TN + FP + FN)
     precision = (TP) / (TP + FP)
-    TPR = TP / (TP + FP)
-    FPR = FP / (TP + FP)
+    TPR = TP / (TP + FN)
+    FPR = FP / (TP + TN)
     return acc, precision, TPR, FPR
 
 
@@ -30,6 +32,7 @@ for file in os.listdir():
     obj = pickle.load(open(file, 'rb'))
     matrix = np.array(obj['confusion_matrix_list'])
     predict_list = np.array(obj['predict_list'])
+    y_pre = tf.argmax(predict_list[-1], 1)
     if 'evaluate' in file:
         print(file)
         print(matrix)
@@ -47,7 +50,7 @@ plt.xlabel('Epochs')
 plt.ylabel('Percentage')
 for file_name in acc_dict:
     acc = acc_dict[file_name]
-    plt.plot(np.arange(0, len(acc)), acc, label=file_name)
+    plt.plot(np.arange(0, len(acc)), acc, label=file_name.split('.')[0])
 plt.legend()
 
 # # 画precision
@@ -57,7 +60,7 @@ plt.legend()
 # plt.ylabel('Percentage')
 # for file_name in TPR_dict:
 #     precision = precision_dict[file_name]
-#     plt.plot(np.arange(0, len(precision)), precision, label=file_name)
+#     plt.plot(np.arange(0, len(precision)), precision, label=file_name.split('.')[0])
 # plt.legend()
 
 # 画TPR
@@ -67,7 +70,7 @@ plt.xlabel('Epochs')
 plt.ylabel('Percentage')
 for file_name in TPR_dict:
     TPR = TPR_dict[file_name]
-    plt.plot(np.arange(0, len(TPR)), TPR, label=file_name)
+    plt.plot(np.arange(0, len(TPR)), TPR, label=file_name.split('.')[0])
 plt.legend()
 
 
@@ -78,7 +81,7 @@ plt.legend()
 # plt.ylabel('Percentage')
 # for file_name in TPR_dict:
 #     FPR = FPR_dict[file_name]
-#     plt.plot(np.arange(0, len(FPR)), FPR, label=file_name)
+#     plt.plot(np.arange(0, len(FPR)), FPR, label=file_name.split('.')[0])
 # plt.legend()
 
 plt.show()
