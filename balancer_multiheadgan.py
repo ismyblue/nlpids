@@ -23,7 +23,7 @@ from classifier_multihead import MultiHeadAttention, MultiHeadLayer, MultiHeadCl
 
 from preprocessor import PreProcessor
 from keywords import get_keywords_dict, keywords_dict_size
-from dataset import load_http_dataset_csic_2010
+from dataset import load_csic_2010
 from sklearn.model_selection import train_test_split
 
 """
@@ -322,5 +322,5 @@ class Discriminator(keras.Model):
 
 if __name__ == '__main__':
     data_balancer = Balancer(523, 16, keywords_dict_size(), num_classes=2, num_layers=1, num_heads=1, dff=16)
-    (data, labels), (_, _) = load_http_dataset_csic_2010()
+    (data, labels), (_, _) = load_csic_2010()
     data_balancer.train(data, labels, test_size=0.1, batch_size=64, epochs=20)

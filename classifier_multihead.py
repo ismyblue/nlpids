@@ -4,10 +4,13 @@ from tensorflow import keras
 import numpy as np
 import matplotlib.pyplot as plt
 import time
-from dataset import load_http_dataset_csic_2010
-from keywords import keywords_dict_size
+from dataset import load_csic_2010
+from keywords import csic2010_keywords_dict_size, get_csic2010_keywords_dict
 from classifier_BiLSTM import *
 from callback_utils import Confusion_Matrix_Saver
+
+physical_devices = tf.config.experimental.list_physical_devices('GPU')
+tf.config.experimental.set_memory_growth(physical_devices[0], True)
 
 
 class MultiHeadAttention(keras.layers.Layer):
@@ -223,6 +226,7 @@ class WebAttackClassifier(keras.Model):
         super(WebAttackClassifier, self).__init__()
         self.model_cls = model_cls
         self.d_model = d_model
+        self.num_classes = categories
         print('分类器模型架构为：{}'.format(model_cls))
 
         # 词嵌入层，word2vec
@@ -274,7 +278,8 @@ class WebAttackClassifier(keras.Model):
 
         return final_output
 
-    def train(self, x_train, y_train, x_test, y_test, epochs=20):
+    def train(self, x_train, y_train, x_validate, y_validate, result_save_filepath, checkpoints_name,
+              gradient_tape_name, epochs=20):
         """
         训练
         :param x_train:
@@ -290,35 +295,46 @@ class WebAttackClassifier(keras.Model):
         optimizer = keras.optimizers.Adam(learning_rate, beta_1=0.9, beta_2=0.98, epsilon=1e-9)
 
         # 损失函数
-        loss_object = keras.losses.SparseCategoricalCrossentropy(from_logits=True)  # , reduction='none')
+        # loss_object = keras.losses.SparseCategoricalCrossentropy(from_logits=False)  # , reduction='none')
+        loss_object = keras.losses.CategoricalCrossentropy(from_logits=False)  # , reduction='none')
         # loss_object = keras.losses.BinaryCrossentropy(from_logits=True)#, reduction='none')
 
         train_loss = keras.metrics.Mean(name='train_loss')
-        train_accuracy = keras.metrics.SparseCategoricalAccuracy(name='train_accuracy')
+        train_accuracy = keras.metrics.CategoricalAccuracy(name='train_accuracy')
 
         # ************************************
         # 3. 训练流程的准备
         # ************************************
 
         # 定义checkpoints管理器
-        checkpoint_path = "./checkpoints/train"
+        # 保存模型的回调函数
+        checkpoint_path = "./checkpoints/" + checkpoints_name + "/"
         ckpt = tf.train.Checkpoint(model=webAttackClassifier, optimizer=optimizer)
         ckpt_manager = tf.train.CheckpointManager(ckpt, checkpoint_path, max_to_keep=5)
 
         # 使用Tensorboard可视化训练过程的loss和accuracy
         current_time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-        train_log_dir = './logs/gradient_tape/' + current_time + '/train'
+        train_log_dir = './logs/gradient_tape/' + gradient_tape_name + "/" + current_time + '/train'
         train_summary_writer = tf.summary.create_file_writer(train_log_dir)
 
         # ************************************
         # 4. 开始训练
         # ************************************
+
+        # 混淆矩阵，用来计算acc, TPR
+        confusion_matrix_list = []
+        # 用来画ROC曲线
+        predict_list = []
+
         for epoch in range(epochs):
             start = time.time()
             train_loss.reset_states()
             train_accuracy.reset_states()
 
             train_dataset = tf.data.Dataset.from_tensor_slices((x_train, y_train)).shuffle(y_train.shape[0]).batch(64)
+            # validate_dataset = tf.data.Dataset.from_tensor_slices((x_validate, y_validate)).shuffle(x_validate.shape[0]).batch(64)
+            batch_total = len(train_dataset)
+
             # 分批次训练
             for (batch, (inp, labels)) in enumerate(train_dataset):
                 # 训练一批
@@ -327,6 +343,18 @@ class WebAttackClassifier(keras.Model):
                     # loss = self.loss_function(labels, predictions, loss_object)
                     loss = tf.reduce_mean(loss_object(labels, predictions))
 
+                    if batch % 100 == 0:
+                        # 保存训练集上每100批的预测结果和混淆矩阵
+                        predict_list.append(predictions)
+                        y_pre = tf.argmax(predictions, axis=1)
+                        matrix = np.zeros(shape=(self.num_classes, self.num_classes), dtype='int32')
+                        y_true = tf.argmax(labels, axis=1)
+                        for i in range(y_pre.shape[0]):
+                            matrix[y_true[i]][y_pre[i]] += 1
+                        # 添加混淆矩阵
+                        confusion_matrix_list.append(matrix)
+
+                # 计算梯度并且梯度下降
                 gradients = tape.gradient(loss, webAttackClassifier.trainable_variables)
                 optimizer.apply_gradients(zip(gradients, webAttackClassifier.trainable_variables))
 
@@ -338,9 +366,15 @@ class WebAttackClassifier(keras.Model):
                     tf.summary.scalar('loss', train_loss.result(), step=epoch)
                     tf.summary.scalar('accuracy', train_accuracy.result(), step=epoch)
 
-                if batch % 20 == 0:
-                    print('Epochs {} Batch {} Loss {:.4f} Accuracy {:.4f}'.format(
-                        epoch + 1, batch, train_loss.result(), train_accuracy.result()))
+                if batch % 50 == 0:
+                    print('Epochs {} Batch {}/{} Loss {:.4f} Accuracy {:.4f}'.format(
+                        epoch + 1, batch, batch_total, train_loss.result(), train_accuracy.result()))
+
+
+            # 每一epoch结束，保存一下所有的混淆矩阵和预测结果
+            with open(result_save_filepath, 'wb') as f:
+                pickle.dump({'confusion_matrix_list': confusion_matrix_list, 'predict_list': predict_list}, f)
+            print('第{}个epoch的混淆矩阵和预测结果保存成功...'.format(epoch))
 
             if (epoch + 1) % 5 == 0:
                 ckpt_save_path = ckpt_manager.save()
@@ -351,39 +385,14 @@ class WebAttackClassifier(keras.Model):
             print('Time taken for 1 epoch: {} secs\n'.format(time.time() - start))
 
             # 执行验证step
-            val_dataset = tf.data.Dataset.from_tensor_slices((x_test, y_test)).shuffle(y_test.shape[0]).batch(64)
+            val_dataset = tf.data.Dataset.from_tensor_slices((x_validate, y_validate)).shuffle(
+                y_validate.shape[0]).batch(64)
             self.validate(dataset=val_dataset)
-
-            # 预测
-            print("开始预测...")
-            http_text_list = [http_text0, http_text1, http_text2, http_text3]
-            pre = PreProcessor(get_keywords_dict())
-            test_data = []
-            for http_text in http_text_list:
-                digital = pre.format_unification_digital_list(http_text)
-                test_data.append(digital)
-                print(len(digital), digital)
-                print(pre.format_unification_text(http_text))
-            # 填充定长
-            test_data = tf.keras.preprocessing.sequence.pad_sequences(test_data, maxlen=x_train.shape[1],
-                                                                      padding='post')
-            pre_labels = webAttackClassifier(test_data, training=False)
-            print('pre_labels.shape:', pre_labels.shape)
-            print(pre_labels)
-            pre_labels = tf.argmax(tf.nn.softmax(pre_labels, axis=1), axis=1)
-            print(pre_labels)
-            for label in pre_labels:
-                if label == 1:
-                    print('异常', end=' ')
-                else:
-                    print('正常', end=' ')
-            print()
-            from tensorflow.keras.utils import plot_model
 
     def validate(self, dataset, eval_type='Val'):
         """ 验证或测试 """
         print("*** Running {} step ***".format(eval_type))
-        accuracy = keras.metrics.SparseCategoricalAccuracy(name='{}_accuracy'.format(eval_type.lower()))
+        accuracy = keras.metrics.CategoricalAccuracy(name='{}_accuracy'.format(eval_type.lower()))
 
         for (batch, (inp, labels)) in enumerate(dataset):
             # tar_input = labels[:, :-1]  # 目标序列首位插入了开始符 [start]，相当于做了右移
@@ -424,17 +433,17 @@ if __name__ == '__main__':
     for model_cls in model_cls_list:
         print("开始对{}模型进行实验...".format(model_cls))
 
-        (x_train, y_train), (x_validate, y_validate), (x_test, y_test) = load_http_dataset_csic_2010()
+        (x_train, y_train), (x_validate, y_validate), (x_test, y_test) = load_csic_2010()
         print("x_train.shape:", x_train.shape)
         print("y_train.shape:", y_train.shape)
-        vocab_size = keywords_dict_size()
+        vocab_size = csic2010_keywords_dict_size()
         print("vocab_size:", vocab_size)
-        x_train = x_train[:100]
-        y_train = y_train[:100]
-        x_validate = x_validate[:100]
-        y_validate = y_validate[:100]
-        x_test = x_test[:100]
-        y_test = y_test[:100]
+        # x_train = x_train[:100]
+        # y_train = y_train[:100]
+        # x_validate = x_validate[:100]
+        # y_validate = y_validate[:100]
+        # x_test = x_test[:100]
+        # y_test = y_test[:100]
 
         # one_hot 标签
         y_train = tf.squeeze(tf.one_hot(y_train, 2))
@@ -451,46 +460,49 @@ if __name__ == '__main__':
         webAttackClassifier = WebAttackClassifier(num_layers=1, seq_len=x_train.shape[1], d_model=64, num_heads=8,
                                                   dff=16, input_vocab_size=vocab_size, categories=2,
                                                   model_cls=model_cls)
-        # # 学习速率
-        # learning_rate = CustomSchedule(webAttackClassifier.d_model)
-        # # 优化器
-        # optimizer = keras.optimizers.Adam(learning_rate, beta_1=0.9, beta_2=0.98, epsilon=1e-9)
-        optimizer = keras.optimizers.Adam()
-        # 指定模型优化器、loss、指标
-        webAttackClassifier.compile(optimizer=optimizer,
-                                    loss=tf.keras.losses.CategoricalCrossentropy(from_logits=False),
-                                    metrics=[tf.keras.metrics.CategoricalAccuracy(),
-                                             tf.keras.metrics.Precision(),
-                                             tf.keras.metrics.Recall(),
-                                             ])
 
-        # 训练##############################################
-        print('开始训练...')
-        # history记录回调函数
-        csv_logger = tf.keras.callbacks.CSVLogger('history/{}_fit.csv'.format(model_cls))
-        # 保存训练集混淆矩阵的回调函数
-        train_confusion_matrix_saver = Confusion_Matrix_Saver('confusion_matrix/{}_train.pkl'.format(model_cls),
-                                                              num_classes=2, x=x_train, y=y_train)
-        # 保存验证集混淆矩阵的回调函数
-        validate_confusion_matrix_saver = Confusion_Matrix_Saver('confusion_matrix/{}_validate.pkl'.format(model_cls),
-                                                                 num_classes=2, x=x_validate, y=y_validate)
-        # 保存模型的回调函数
-        model_saver = keras.callbacks.ModelCheckpoint(filepath=checkpoint_dir + "/" + model_cls + "{epoch}",
-                                                      save_freq='epoch', verbose=1)
-        # 开始训练
-        webAttackClassifier.fit(x=x_train, y=y_train, batch_size=64, epochs=50,
-                                callbacks=[csv_logger, train_confusion_matrix_saver, validate_confusion_matrix_saver,
-                                           model_saver])
-        # webAttackClassifier.train(x_train, y_train, x_test, y_test, 20)
-
-        # 评估##############################################
-        print('使用测试集评估...')
-        # 测试集的混淆矩阵保存
-        test_confusion_matrix_saver = Confusion_Matrix_Saver('confusion_matrix/{}_test.pkl'.format(model_cls),
-                                                             num_classes=2, x=x_test, y=y_test)
-        # 评估
-        webAttackClassifier.evaluate(x_test[:10], y_test[:10], batch_size=64, callbacks=[test_confusion_matrix_saver])
-
+        webAttackClassifier.train(x_train, y_train, x_validate, y_validate, 'confusion_matrix/' + model_cls + '_train.pkl', model_cls, model_cls)
+        # ###########################################################################################
+        # # # 学习速率
+        # # learning_rate = CustomSchedule(webAttackClassifier.d_model)
+        # # # 优化器
+        # # optimizer = keras.optimizers.Adam(learning_rate, beta_1=0.9, beta_2=0.98, epsilon=1e-9)
+        # optimizer = keras.optimizers.Adam()
+        # # 指定模型优化器、loss、指标
+        # webAttackClassifier.compile(optimizer=optimizer,
+        #                             loss=tf.keras.losses.CategoricalCrossentropy(from_logits=False),
+        #                             metrics=[tf.keras.metrics.CategoricalAccuracy(),
+        #                                      tf.keras.metrics.Precision(),
+        #                                      tf.keras.metrics.Recall(),
+        #                                      ])
+        #
+        # # 训练##############################################
+        # print('开始训练...')
+        # # history记录回调函数
+        # csv_logger = tf.keras.callbacks.CSVLogger('history/{}_fit.csv'.format(model_cls))
+        # # 保存训练集混淆矩阵的回调函数
+        # train_confusion_matrix_saver = Confusion_Matrix_Saver('confusion_matrix/{}_train.pkl'.format(model_cls),
+        #                                                       num_classes=2, x=x_train, y=y_train)
+        # # 保存验证集混淆矩阵的回调函数
+        # validate_confusion_matrix_saver = Confusion_Matrix_Saver('confusion_matrix/{}_validate.pkl'.format(model_cls),
+        #                                                          num_classes=2, x=x_validate, y=y_validate)
+        # # 保存模型的回调函数
+        # model_saver = keras.callbacks.ModelCheckpoint(filepath=checkpoint_dir + "/" + model_cls + "{epoch}",
+        #                                               save_freq='epoch', verbose=1)
+        # # 开始训练
+        # webAttackClassifier.fit(x=x_train, y=y_train, batch_size=64, epochs=50,
+        #                         callbacks=[csv_logger, train_confusion_matrix_saver, validate_confusion_matrix_saver,
+        #                                    model_saver])
+        # # webAttackClassifier.train(x_train, y_train, x_test, y_test, 20)
+        #
+        # # 评估##############################################
+        # print('使用测试集评估...')
+        # # 测试集的混淆矩阵保存
+        # test_confusion_matrix_saver = Confusion_Matrix_Saver('confusion_matrix/{}_test.pkl'.format(model_cls),
+        #                                                      num_classes=2, x=x_test, y=y_test)
+        # # 评估
+        # webAttackClassifier.evaluate(x_test[:10], y_test[:10], batch_size=64, callbacks=[test_confusion_matrix_saver])
+        #
         # 删除空间，避免OOM?
         del x_train
         del y_train
@@ -498,7 +510,8 @@ if __name__ == '__main__':
         del y_validate
         del x_test
         del y_test
-        del train_confusion_matrix_saver
-        del validate_confusion_matrix_saver
-        del test_confusion_matrix_saver
+        # del train_confusion_matrix_saver
+        # del validate_confusion_matrix_saver
+        # del test_confusion_matrix_saver
         del webAttackClassifier
+        # ###########################################################################################

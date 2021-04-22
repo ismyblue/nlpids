@@ -1,0 +1,18 @@
+section selecct small source span strike strong style sub summary sup table tbody
+td textarea tfoot th thead time title tr track
+
+abstract	else	instanceof	switch
+boolean	enum	int	synchronized
+break	export	interface	this
+byte	extends	long	throw
+case	FALSE	native	throws
+catch	final	new	transient
+char	finally	null	TRUE
+class	float	package	try
+const	for	private	typeof
+continue	function	protected	var
+debugger	goto	public	void
+default	if	return	volatile
+delete	implements	short	while
+do	import	static	with
+double	in	super

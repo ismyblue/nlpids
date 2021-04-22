@@ -1,0 +1,19 @@
+select update delete insert create alter drop
+order by
+group by
+truncate
+replace
+commit
+rollback
+savepoingt
+transaction
+set
+distinct
+all
+desc
+null
+limit
+top
+where
+like
+from

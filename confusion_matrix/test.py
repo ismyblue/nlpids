@@ -1,7 +1,6 @@
 import pickle
 import numpy as np
 import os
-import tensorflow as tf
 import matplotlib.pyplot as plt
 
 
@@ -32,17 +31,19 @@ for file in os.listdir():
     obj = pickle.load(open(file, 'rb'))
     matrix = np.array(obj['confusion_matrix_list'])
     predict_list = np.array(obj['predict_list'])
-    y_pre = tf.argmax(predict_list[-1], 1)
     if 'evaluate' in file:
         print(file)
         print(matrix)
         continue
     acc, precision, TPR, FPR = calc_binary_metrics(matrix)
+    # acc_dict[file] = np.append([0.1, ], acc)
+    # precision_dict[file] = np.append([0.1, ], precision)
+    # TPR_dict[file] = np.append([0.1, ], TPR)
+    # FPR_dict[file] = np.append([0.1, ], FPR)
     acc_dict[file] = acc
     precision_dict[file] = precision
     TPR_dict[file] = TPR
     FPR_dict[file] = FPR
-
 # 画ACC
 plt.figure()
 plt.title('Accuracy')

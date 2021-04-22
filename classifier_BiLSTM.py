@@ -164,8 +164,8 @@ Host: localhost:8080
 Cookie: JSESSIONID=B92A8B48B9008CD29F622A994E0F650D
 Connection: close"""
 
-from dataset import load_http_dataset_csic_2010, load_http_text_list
-from keywords import keywords_dict_size, get_keywords_dict
+from dataset import load_csic_2010, load_http_text_list
+from keywords import csic2010_keywords_dict_size, get_csic2010_keywords_dict
 from sklearn.model_selection import train_test_split
 from preprocessor import PreProcessor
 import pickle
@@ -175,10 +175,10 @@ import random
 
 if __name__ == '__main__':
     # 获取数据和标签
-    (x_train, y_train), _, (x_test, y_test) = load_http_dataset_csic_2010()
-    print("字典大小：", keywords_dict_size())
+    (x_train, y_train), _, (x_test, y_test) = load_csic_2010()
+    print("字典大小：", csic2010_keywords_dict_size())
     # 构造分类器
-    cls = Classifier(keywords_dict_size(), weight_path='training/cp.ckpt')
+    cls = Classifier(csic2010_keywords_dict_size(), weight_path='training/cp.ckpt')
     cls.model.summary()
     # exit(0)
     # # 训练
@@ -190,7 +190,7 @@ if __name__ == '__main__':
 
     # 预测
     http_text_list = [http_text0, http_text1, http_text2, http_text3]
-    pre = PreProcessor(get_keywords_dict())
+    pre = PreProcessor(get_csic2010_keywords_dict())
     test_data = []
     for http_text in http_text_list:
         digital = pre.format_unification_digital_list(http_text)

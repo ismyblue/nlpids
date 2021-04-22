@@ -4,7 +4,7 @@
 
 import pickle
 from dataset import *
-from keywords import keywords_dict_size
+from keywords import csic2010_keywords_dict_size
 from classifier_multihead import WebAttackClassifier, CustomSchedule
 
 from tensorflow import keras
@@ -17,6 +17,9 @@ from imblearn.under_sampling import RandomUnderSampler, ClusterCentroids, NearMi
 from imblearn.combine import SMOTEENN, SMOTETomek
 
 from callback_utils import Confusion_Matrix_Saver
+
+physical_devices = tf.config.experimental.list_physical_devices('GPU')
+tf.config.experimental.set_memory_growth(physical_devices[0], True)
 
 
 def balance_data(method, x_train, y_train):
@@ -74,22 +77,23 @@ if __name__ == '__main__':
     样本平衡选择实验
     """
     # 获取字典大小
-    vocab_size = keywords_dict_size()
+    vocab_size = csic2010_keywords_dict_size()
     print("vocab_size:", vocab_size)
 
     resampling_methods = ['RandomOverSampler', 'RandomUnderSampler', 'SMOTE', 'SMOTEENN', 'None', 'TomekLinks',
                           'ADASYN', 'NearMiss', 'SMOTETomek', 'BorderlineSMOTE', 'ClusterCentroids']
     # 选用不同的方法进行样本平衡
-    for i in range(0, len(resampling_methods)):
+    # for i in range(0, len(resampling_methods)):
+    for i in [0, 1, 4, 5, 7, 8]:
         method = resampling_methods[i]
         # 获取数据
-        (x_train, y_train), (x_validate, y_validate), (x_test, y_test) = load_http_dataset_csic_2010()
-        x_train = x_train[:100]
-        y_train = y_train[:100]
-        x_validate = x_validate[:100]
-        y_validate = y_validate[:100]
-        x_test = x_test[:100]
-        y_test = y_test[:100]
+        (x_train, y_train), (x_validate, y_validate), (x_test, y_test) = load_csic_2010()
+        # x_train = x_train[:100]
+        # y_train = y_train[:100]
+        # x_validate = x_validate[:100]
+        # y_validate = y_validate[:100]
+        # x_test = x_test[:100]
+        # y_test = y_test[:100]
         print('样本平衡前: y_train', sorted(Counter(y_train).items()))
 
         if os.path.exists('resampling_data/{}.pkl'.format(method)):
@@ -148,7 +152,7 @@ if __name__ == '__main__':
         model_saver = keras.callbacks.ModelCheckpoint(filepath=checkpoint_dir + "/" + method + "{epoch}",
                                                       save_freq='epoch', verbose=1)
         # 开始训练
-        webAttackClassifier.fit(x_train, y_train, batch_size=64, epochs=5,
+        webAttackClassifier.fit(x_train, y_train, batch_size=64, epochs=50,
                                 callbacks=[csv_logger, train_confusion_matrix_saver, validate_confusion_matrix_saver,
                                            model_saver])
 
